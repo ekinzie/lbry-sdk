@@ -45,7 +45,7 @@ from lbry.extras import system_info
 from lbry.extras.daemon import analytics
 from lbry.extras.daemon.components import WALLET_COMPONENT, DATABASE_COMPONENT, DHT_COMPONENT, BLOB_COMPONENT
 from lbry.extras.daemon.components import FILE_MANAGER_COMPONENT, DISK_SPACE_COMPONENT, TRACKER_ANNOUNCER_COMPONENT
-from lbry.extras.daemon.components import EXCHANGE_RATE_MANAGER_COMPONENT, UPNP_COMPONENT
+from lbry.extras.daemon.components import EXCHANGE_RATE_MANAGER_COMPONENT
 from lbry.extras.daemon.componentmanager import RequiredCondition
 from lbry.extras.daemon.componentmanager import ComponentManager
 from lbry.extras.daemon.json_response_encoder import JSONResponseEncoder
@@ -59,7 +59,7 @@ from lbry.schema.url import URL
 if typing.TYPE_CHECKING:
     from lbry.blob.blob_manager import BlobManager
     from lbry.dht.node import Node
-    from lbry.extras.daemon.components import UPnPComponent, DiskSpaceManager
+    from lbry.extras.daemon.components import  DiskSpaceManager
     from lbry.extras.daemon.exchange_rate_manager import ExchangeRateManager
     from lbry.extras.daemon.storage import SQLiteStorage
     from lbry.wallet import WalletManager, Ledger
@@ -405,9 +405,9 @@ class Daemon(metaclass=JSONRPCServerType):
     def disk_space_manager(self) -> typing.Optional['DiskSpaceManager']:
         return self.component_manager.get_component(DISK_SPACE_COMPONENT)
 
-    @property
-    def upnp(self) -> typing.Optional['UPnPComponent']:
-        return self.component_manager.get_component(UPNP_COMPONENT)
+    #@property
+    #def upnp(self) -> typing.Optional['UPnPComponent']:
+    #    return self.component_manager.get_component(UPNP_COMPONENT)
 
     @classmethod
     def get_api_definitions(cls):
@@ -721,7 +721,8 @@ class Daemon(metaclass=JSONRPCServerType):
         try:
             result = method(self, *_args, **_kwargs)
             if asyncio.iscoroutine(result):
-                result = await result
+                tasks = [asyncio.create_task(result)]
+                result = await asyncio.wait(tasks)
             return result
         except asyncio.CancelledError:
             self.cancelled_request_metric.labels(method=function_name).inc()
