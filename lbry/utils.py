@@ -16,7 +16,7 @@ import contextlib
 import functools
 import collections
 import hashlib
-import pkg_resources
+import importlib.resources as pkg_resources
 
 import certifi
 import aiohttp

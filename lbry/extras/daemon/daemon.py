@@ -45,7 +45,7 @@ from lbry.extras import system_info
 from lbry.extras.daemon import analytics
 from lbry.extras.daemon.components import WALLET_COMPONENT, DATABASE_COMPONENT, DHT_COMPONENT, BLOB_COMPONENT
 from lbry.extras.daemon.components import FILE_MANAGER_COMPONENT, DISK_SPACE_COMPONENT, TRACKER_ANNOUNCER_COMPONENT
-from lbry.extras.daemon.components import EXCHANGE_RATE_MANAGER_COMPONENT, UPNP_COMPONENT
+from lbry.extras.daemon.components import EXCHANGE_RATE_MANAGER_COMPONENT
 from lbry.extras.daemon.componentmanager import RequiredCondition
 from lbry.extras.daemon.componentmanager import ComponentManager
 from lbry.extras.daemon.json_response_encoder import JSONResponseEncoder
@@ -59,7 +59,7 @@ from lbry.schema.url import URL
 if typing.TYPE_CHECKING:
     from lbry.blob.blob_manager import BlobManager
     from lbry.dht.node import Node
-    from lbry.extras.daemon.components import UPnPComponent, DiskSpaceManager
+    from lbry.extras.daemon.components import  DiskSpaceManager
     from lbry.extras.daemon.exchange_rate_manager import ExchangeRateManager
     from lbry.extras.daemon.storage import SQLiteStorage
     from lbry.wallet import WalletManager, Ledger
@@ -405,9 +405,9 @@ class Daemon(metaclass=JSONRPCServerType):
     def disk_space_manager(self) -> typing.Optional['DiskSpaceManager']:
         return self.component_manager.get_component(DISK_SPACE_COMPONENT)
 
-    @property
-    def upnp(self) -> typing.Optional['UPnPComponent']:
-        return self.component_manager.get_component(UPNP_COMPONENT)
+    #@property
+    #def upnp(self) -> typing.Optional['UPnPComponent']:
+    #    return self.component_manager.get_component(UPNP_COMPONENT)
 
     @classmethod
     def get_api_definitions(cls):
@@ -586,14 +586,36 @@ class Daemon(metaclass=JSONRPCServerType):
         data = await request.json()
         params = data.get('params', {})
         include_protobuf = params.pop('include_protobuf', False) if isinstance(params, dict) else False
-        result = await self._process_rpc_call(data)
+        try:
+            result = await self._process_rpc_call(data)
+        except* TerminateTaskGroup:
+            pass
         ledger = None
         if 'wallet' in self.component_manager.get_components_status():
             # self.ledger only available if wallet component is not skipped
             ledger = self.ledger
         try:
-            encoded_result = jsonrpc_dumps_pretty(
-                result, ledger=ledger, include_protobuf=include_protobuf)
+            # How do I know what type `result` will be?
+            if isinstance(result, JSONRPCError):
+                log.exception('Failed to encode JSON RPC result:')
+                encoded_result = jsonrpc_dumps_pretty(JSONRPCError(
+                    JSONRPCError.CODE_APPLICATION_ERROR,
+                    'After successfully executing the command, failed to encode result for JSON RPC response.',
+                    {'traceback': format_exc()}
+                ), ledger=ledger)
+            elif isinstance(result, dict):
+                jsondata = json.dumps(result)
+                encoded_result = jsonrpc_dumps_pretty(
+                    jsondata, ledger=ledger, include_protobuf=include_protobuf)
+            else:
+                for task in result[0]: # done tasks
+                    if type(task) is str:
+                        jsondata = task
+                    else:
+                        jsondata = task.result()
+                    encoded_result = jsonrpc_dumps_pretty(
+                        jsondata, ledger=ledger, include_protobuf=include_protobuf)
+                    break
         except Exception:
             log.exception('Failed to encode JSON RPC result:')
             encoded_result = jsonrpc_dumps_pretty(JSONRPCError(
@@ -721,7 +743,8 @@ class Daemon(metaclass=JSONRPCServerType):
         try:
             result = method(self, *_args, **_kwargs)
             if asyncio.iscoroutine(result):
-                result = await result
+                tasks = [asyncio.create_task(result)]
+                result = await asyncio.wait(tasks)
             return result
         except asyncio.CancelledError:
             self.cancelled_request_metric.labels(method=function_name).inc()
@@ -4982,7 +5005,7 @@ class Daemon(metaclass=JSONRPCServerType):
         if not is_valid_blobhash(blob_hash):
             # TODO: use error from lbry.error
             raise Exception("invalid blob hash")
-        peer_q = asyncio.Queue(loop=self.component_manager.loop)
+        peer_q = asyncio.Queue()
         if self.component_manager.has_component(TRACKER_ANNOUNCER_COMPONENT):
             tracker = self.component_manager.get_component(TRACKER_ANNOUNCER_COMPONENT)
             tracker_peers = await tracker.get_kademlia_peer_list(bytes.fromhex(blob_hash))

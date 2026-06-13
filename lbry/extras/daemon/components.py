@@ -7,9 +7,9 @@ import typing
 
 import base58
 
-from aioupnp import __version__ as aioupnp_version
-from aioupnp.upnp import UPnP
-from aioupnp.fault import UPnPError
+#from aioupnp import __version__ as aioupnp_version
+#from aioupnp.upnp import UPnP
+#from aioupnp.fault import UPnPError
 
 from lbry import utils
 from lbry.dht.node import Node
@@ -44,7 +44,7 @@ FILE_MANAGER_COMPONENT = "file_manager"
 DISK_SPACE_COMPONENT = "disk_space"
 BACKGROUND_DOWNLOADER_COMPONENT = "background_downloader"
 PEER_PROTOCOL_SERVER_COMPONENT = "peer_protocol_server"
-UPNP_COMPONENT = "upnp"
+#UPNP_COMPONENT = "upnp"
 EXCHANGE_RATE_MANAGER_COMPONENT = "exchange_rate_manager"
 TRACKER_ANNOUNCER_COMPONENT = "tracker_announcer_component"
 LIBTORRENT_COMPONENT = "libtorrent_component"
@@ -243,7 +243,7 @@ class BlobComponent(Component):
 
 class DHTComponent(Component):
     component_name = DHT_COMPONENT
-    depends_on = [UPNP_COMPONENT, DATABASE_COMPONENT]
+    depends_on = [DATABASE_COMPONENT]
 
     def __init__(self, component_manager):
         super().__init__(component_manager)
@@ -273,10 +273,11 @@ class DHTComponent(Component):
 
     async def start(self):
         log.info("start the dht")
-        upnp_component = self.component_manager.get_component(UPNP_COMPONENT)
-        self.external_peer_port = upnp_component.upnp_redirects.get("TCP", self.conf.tcp_port)
-        self.external_udp_port = upnp_component.upnp_redirects.get("UDP", self.conf.udp_port)
-        external_ip = upnp_component.external_ip
+        #upnp_component = self.component_manager.get_component(UPNP_COMPONENT)
+        #self.external_peer_port = upnp_component.upnp_redirects.get("TCP", self.conf.tcp_port)
+        #self.external_udp_port = upnp_component.upnp_redirects.get("UDP", self.conf.udp_port)
+        #external_ip = upnp_component.external_ip
+        external_ip = None
         storage = self.component_manager.get_component(DATABASE_COMPONENT)
         if not external_ip:
             external_ip, _ = await utils.get_external_ip(self.conf.lbryum_servers)
@@ -505,7 +506,7 @@ class TorrentComponent(Component):
 
 class PeerProtocolServerComponent(Component):
     component_name = PEER_PROTOCOL_SERVER_COMPONENT
-    depends_on = [UPNP_COMPONENT, BLOB_COMPONENT, WALLET_COMPONENT]
+    depends_on = [BLOB_COMPONENT, WALLET_COMPONENT]
 
     def __init__(self, component_manager):
         super().__init__(component_manager)
@@ -530,161 +531,161 @@ class PeerProtocolServerComponent(Component):
             self.blob_server.stop_server()
 
 
-class UPnPComponent(Component):
-    component_name = UPNP_COMPONENT
-
-    def __init__(self, component_manager):
-        super().__init__(component_manager)
-        self._int_peer_port = self.conf.tcp_port
-        self._int_dht_node_port = self.conf.udp_port
-        self.use_upnp = self.conf.use_upnp
-        self.upnp: typing.Optional[UPnP] = None
-        self.upnp_redirects = {}
-        self.external_ip: typing.Optional[str] = None
-        self._maintain_redirects_task = None
-
-    @property
-    def component(self) -> 'UPnPComponent':
-        return self
-
-    async def _repeatedly_maintain_redirects(self, now=True):
-        while True:
-            if now:
-                await self._maintain_redirects()
-            await asyncio.sleep(360)
-
-    async def _maintain_redirects(self):
-        # setup the gateway if necessary
-        if not self.upnp:
-            try:
-                self.upnp = await UPnP.discover(loop=self.component_manager.loop)
-                log.info("found upnp gateway: %s", self.upnp.gateway.manufacturer_string)
-            except Exception as err:
-                log.warning("upnp discovery failed: %s", err)
-                self.upnp = None
-
-        # update the external ip
-        external_ip = None
-        if self.upnp:
-            try:
-                external_ip = await self.upnp.get_external_ip()
-                if external_ip != "0.0.0.0" and not self.external_ip:
-                    log.info("got external ip from UPnP: %s", external_ip)
-            except (asyncio.TimeoutError, UPnPError, NotImplementedError):
-                pass
-        if external_ip and not is_valid_public_ipv4(external_ip):
-            log.warning("UPnP returned a private/reserved ip - %s, checking lbry.com fallback", external_ip)
-            external_ip, _ = await utils.get_external_ip(self.conf.lbryum_servers)
-        if self.external_ip and self.external_ip != external_ip:
-            log.info("external ip changed from %s to %s", self.external_ip, external_ip)
-        if external_ip:
-            self.external_ip = external_ip
-            dht_component = self.component_manager.get_component(DHT_COMPONENT)
-            if dht_component:
-                dht_node = dht_component.component
-                dht_node.protocol.external_ip = external_ip
-        # assert self.external_ip is not None   # TODO: handle going/starting offline
-
-        if not self.upnp_redirects and self.upnp:  # setup missing redirects
-            log.info("add UPnP port mappings")
-            upnp_redirects = {}
-            if PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components:
-                try:
-                    upnp_redirects["TCP"] = await self.upnp.get_next_mapping(
-                        self._int_peer_port, "TCP", "LBRY peer port", self._int_peer_port
-                    )
-                except (UPnPError, asyncio.TimeoutError, NotImplementedError):
-                    pass
-            if DHT_COMPONENT not in self.component_manager.skip_components:
-                try:
-                    upnp_redirects["UDP"] = await self.upnp.get_next_mapping(
-                        self._int_dht_node_port, "UDP", "LBRY DHT port", self._int_dht_node_port
-                    )
-                except (UPnPError, asyncio.TimeoutError, NotImplementedError):
-                    pass
-            if upnp_redirects:
-                log.info("set up redirects: %s", upnp_redirects)
-                self.upnp_redirects.update(upnp_redirects)
-        elif self.upnp:  # check existing redirects are still active
-            found = set()
-            mappings = await self.upnp.get_redirects()
-            for mapping in mappings:
-                proto = mapping.protocol
-                if proto in self.upnp_redirects and mapping.external_port == self.upnp_redirects[proto]:
-                    if mapping.lan_address == self.upnp.lan_address:
-                        found.add(proto)
-            if 'UDP' not in found and DHT_COMPONENT not in self.component_manager.skip_components:
-                try:
-                    udp_port = await self.upnp.get_next_mapping(self._int_dht_node_port, "UDP", "LBRY DHT port")
-                    self.upnp_redirects['UDP'] = udp_port
-                    log.info("refreshed upnp redirect for dht port: %i", udp_port)
-                except (asyncio.TimeoutError, UPnPError, NotImplementedError):
-                    del self.upnp_redirects['UDP']
-            if 'TCP' not in found and PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components:
-                try:
-                    tcp_port = await self.upnp.get_next_mapping(self._int_peer_port, "TCP", "LBRY peer port")
-                    self.upnp_redirects['TCP'] = tcp_port
-                    log.info("refreshed upnp redirect for peer port: %i", tcp_port)
-                except (asyncio.TimeoutError, UPnPError, NotImplementedError):
-                    del self.upnp_redirects['TCP']
-            if ('TCP' in self.upnp_redirects and
-                    PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components) and \
-                    ('UDP' in self.upnp_redirects and DHT_COMPONENT not in self.component_manager.skip_components):
-                if self.upnp_redirects:
-                    log.debug("upnp redirects are still active")
-
-    async def start(self):
-        log.info("detecting external ip")
-        if not self.use_upnp:
-            self.external_ip, _ = await utils.get_external_ip(self.conf.lbryum_servers)
-            return
-        success = False
-        await self._maintain_redirects()
-        if self.upnp:
-            if not self.upnp_redirects and not all(
-                    x in self.component_manager.skip_components
-                    for x in (DHT_COMPONENT, PEER_PROTOCOL_SERVER_COMPONENT)
-            ):
-                log.error("failed to setup upnp")
-            else:
-                success = True
-                if self.upnp_redirects:
-                    log.debug("set up upnp port redirects for gateway: %s", self.upnp.gateway.manufacturer_string)
-        else:
-            log.error("failed to setup upnp")
-        if not self.external_ip:
-            self.external_ip, probed_url = await utils.get_external_ip(self.conf.lbryum_servers)
-            if self.external_ip:
-                log.info("detected external ip using %s fallback", probed_url)
-        if self.component_manager.analytics_manager:
-            self.component_manager.loop.create_task(
-                self.component_manager.analytics_manager.send_upnp_setup_success_fail(
-                    success, await self.get_status()
-                )
-            )
-        self._maintain_redirects_task = self.component_manager.loop.create_task(
-            self._repeatedly_maintain_redirects(now=False)
-        )
-
-    async def stop(self):
-        if self.upnp_redirects:
-            log.info("Removing upnp redirects: %s", self.upnp_redirects)
-            await asyncio.wait([
-                self.upnp.delete_port_mapping(port, protocol) for protocol, port in self.upnp_redirects.items()
-            ])
-        if self._maintain_redirects_task and not self._maintain_redirects_task.done():
-            self._maintain_redirects_task.cancel()
-
-    async def get_status(self):
-        return {
-            'aioupnp_version': aioupnp_version,
-            'redirects': self.upnp_redirects,
-            'gateway': 'No gateway found' if not self.upnp else self.upnp.gateway.manufacturer_string,
-            'dht_redirect_set': 'UDP' in self.upnp_redirects,
-            'peer_redirect_set': 'TCP' in self.upnp_redirects,
-            'external_ip': self.external_ip
-        }
-
+# class UPnPComponent(Component):
+#     component_name = UPNP_COMPONENT
+# 
+#     def __init__(self, component_manager):
+#         super().__init__(component_manager)
+#         self._int_peer_port = self.conf.tcp_port
+#         self._int_dht_node_port = self.conf.udp_port
+#         self.use_upnp = self.conf.use_upnp
+#         self.upnp: typing.Optional[UPnP] = None
+#         self.upnp_redirects = {}
+#         self.external_ip: typing.Optional[str] = None
+#         self._maintain_redirects_task = None
+# 
+#     @property
+#     def component(self) -> 'UPnPComponent':
+#         return self
+# 
+#     async def _repeatedly_maintain_redirects(self, now=True):
+#         while True:
+#             if now:
+#                 await self._maintain_redirects()
+#             await asyncio.sleep(360)
+# 
+#     async def _maintain_redirects(self):
+#         # setup the gateway if necessary
+#         if not self.upnp:
+#             try:
+#                 self.upnp = await UPnP.discover(loop=self.component_manager.loop)
+#                 log.info("found upnp gateway: %s", self.upnp.gateway.manufacturer_string)
+#             except Exception as err:
+#                 log.warning("upnp discovery failed: %s", err)
+#                 self.upnp = None
+# 
+#         # update the external ip
+#         external_ip = None
+#         if self.upnp:
+#             try:
+#                 external_ip = await self.upnp.get_external_ip()
+#                 if external_ip != "0.0.0.0" and not self.external_ip:
+#                     log.info("got external ip from UPnP: %s", external_ip)
+#             except (asyncio.TimeoutError, UPnPError, NotImplementedError):
+#                 pass
+#         if external_ip and not is_valid_public_ipv4(external_ip):
+#             log.warning("UPnP returned a private/reserved ip - %s, checking lbry.com fallback", external_ip)
+#             external_ip, _ = await utils.get_external_ip(self.conf.lbryum_servers)
+#         if self.external_ip and self.external_ip != external_ip:
+#             log.info("external ip changed from %s to %s", self.external_ip, external_ip)
+#         if external_ip:
+#             self.external_ip = external_ip
+#             dht_component = self.component_manager.get_component(DHT_COMPONENT)
+#             if dht_component:
+#                 dht_node = dht_component.component
+#                 dht_node.protocol.external_ip = external_ip
+#         # assert self.external_ip is not None   # TODO: handle going/starting offline
+# 
+#         if not self.upnp_redirects and self.upnp:  # setup missing redirects
+#             log.info("add UPnP port mappings")
+#             upnp_redirects = {}
+#             if PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components:
+#                 try:
+#                     upnp_redirects["TCP"] = await self.upnp.get_next_mapping(
+#                         self._int_peer_port, "TCP", "LBRY peer port", self._int_peer_port
+#                     )
+#                 except (UPnPError, asyncio.TimeoutError, NotImplementedError):
+#                     pass
+#             if DHT_COMPONENT not in self.component_manager.skip_components:
+#                 try:
+#                     upnp_redirects["UDP"] = await self.upnp.get_next_mapping(
+#                         self._int_dht_node_port, "UDP", "LBRY DHT port", self._int_dht_node_port
+#                     )
+#                 except (UPnPError, asyncio.TimeoutError, NotImplementedError):
+#                     pass
+#             if upnp_redirects:
+#                 log.info("set up redirects: %s", upnp_redirects)
+#                 self.upnp_redirects.update(upnp_redirects)
+#         elif self.upnp:  # check existing redirects are still active
+#             found = set()
+#             mappings = await self.upnp.get_redirects()
+#             for mapping in mappings:
+#                 proto = mapping.protocol
+#                 if proto in self.upnp_redirects and mapping.external_port == self.upnp_redirects[proto]:
+#                     if mapping.lan_address == self.upnp.lan_address:
+#                         found.add(proto)
+#             if 'UDP' not in found and DHT_COMPONENT not in self.component_manager.skip_components:
+#                 try:
+#                     udp_port = await self.upnp.get_next_mapping(self._int_dht_node_port, "UDP", "LBRY DHT port")
+#                     self.upnp_redirects['UDP'] = udp_port
+#                     log.info("refreshed upnp redirect for dht port: %i", udp_port)
+#                 except (asyncio.TimeoutError, UPnPError, NotImplementedError):
+#                     del self.upnp_redirects['UDP']
+#             if 'TCP' not in found and PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components:
+#                 try:
+#                     tcp_port = await self.upnp.get_next_mapping(self._int_peer_port, "TCP", "LBRY peer port")
+#                     self.upnp_redirects['TCP'] = tcp_port
+#                     log.info("refreshed upnp redirect for peer port: %i", tcp_port)
+#                 except (asyncio.TimeoutError, UPnPError, NotImplementedError):
+#                     del self.upnp_redirects['TCP']
+#             if ('TCP' in self.upnp_redirects and
+#                     PEER_PROTOCOL_SERVER_COMPONENT not in self.component_manager.skip_components) and \
+#                     ('UDP' in self.upnp_redirects and DHT_COMPONENT not in self.component_manager.skip_components):
+#                 if self.upnp_redirects:
+#                     log.debug("upnp redirects are still active")
+# 
+#     async def start(self):
+#         log.info("detecting external ip")
+#         if not self.use_upnp:
+#             self.external_ip, _ = await utils.get_external_ip(self.conf.lbryum_servers)
+#             return
+#         success = False
+#         await self._maintain_redirects()
+#         if self.upnp:
+#             if not self.upnp_redirects and not all(
+#                     x in self.component_manager.skip_components
+#                     for x in (DHT_COMPONENT, PEER_PROTOCOL_SERVER_COMPONENT)
+#             ):
+#                 log.error("failed to setup upnp")
+#             else:
+#                 success = True
+#                 if self.upnp_redirects:
+#                     log.debug("set up upnp port redirects for gateway: %s", self.upnp.gateway.manufacturer_string)
+#         else:
+#             log.error("failed to setup upnp")
+#         if not self.external_ip:
+#             self.external_ip, probed_url = await utils.get_external_ip(self.conf.lbryum_servers)
+#             if self.external_ip:
+#                 log.info("detected external ip using %s fallback", probed_url)
+#         if self.component_manager.analytics_manager:
+#             self.component_manager.loop.create_task(
+#                 self.component_manager.analytics_manager.send_upnp_setup_success_fail(
+#                     success, await self.get_status()
+#                 )
+#             )
+#         self._maintain_redirects_task = self.component_manager.loop.create_task(
+#             self._repeatedly_maintain_redirects(now=False)
+#         )
+# 
+#     async def stop(self):
+#         if self.upnp_redirects:
+#             log.info("Removing upnp redirects: %s", self.upnp_redirects)
+#             await asyncio.wait([
+#                 self.upnp.delete_port_mapping(port, protocol) for protocol, port in self.upnp_redirects.items()
+#             ])
+#         if self._maintain_redirects_task and not self._maintain_redirects_task.done():
+#             self._maintain_redirects_task.cancel()
+# 
+#     async def get_status(self):
+#         return {
+#             'aioupnp_version': aioupnp_version,
+#             'redirects': self.upnp_redirects,
+#             'gateway': 'No gateway found' if not self.upnp else self.upnp.gateway.manufacturer_string,
+#             'dht_redirect_set': 'UDP' in self.upnp_redirects,
+#             'peer_redirect_set': 'TCP' in self.upnp_redirects,
+#             'external_ip': self.external_ip
+#         }
+# 
 
 class ExchangeRateManagerComponent(Component):
     component_name = EXCHANGE_RATE_MANAGER_COMPONENT
