@@ -604,9 +604,8 @@ class Daemon(metaclass=JSONRPCServerType):
                     {'traceback': format_exc()}
                 ), ledger=ledger)
             elif isinstance(result, dict):
-                jsondata = json.dumps(result)
                 encoded_result = jsonrpc_dumps_pretty(
-                    jsondata, ledger=ledger, include_protobuf=include_protobuf)
+                    result, ledger=ledger, include_protobuf=include_protobuf)
             else:
                 for task in result[0]: # done tasks
                     if type(task) is str:
