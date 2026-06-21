@@ -595,6 +595,7 @@ class Daemon(metaclass=JSONRPCServerType):
             # self.ledger only available if wallet component is not skipped
             ledger = self.ledger
         try:
+            # How do I know what type `result` will be?
             if isinstance(result, JSONRPCError):
                 log.exception('Failed to encode JSON RPC result:')
                 encoded_result = jsonrpc_dumps_pretty(JSONRPCError(
@@ -602,6 +603,10 @@ class Daemon(metaclass=JSONRPCServerType):
                     'After successfully executing the command, failed to encode result for JSON RPC response.',
                     {'traceback': format_exc()}
                 ), ledger=ledger)
+            elif isinstance(result, dict):
+                jsondata = json.dumps(result)
+                encoded_result = jsonrpc_dumps_pretty(
+                    jsondata, ledger=ledger, include_protobuf=include_protobuf)
             else:
                 for task in result[0]: # done tasks
                     if type(task) is str:
