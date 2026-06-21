@@ -688,34 +688,20 @@ class Config(CLIConfig):
     tracker_servers = Servers("BitTorrent-compatible (BEP15) UDP trackers for helping P2P discovery", [
         ('tracker.lbry.com', 9252),
         ('tracker.lbry.grin.io', 9252),
-        ('tracker.lbry.pigg.es', 9252),
         ('tracker.lizard.technology', 9252),
         ('s1.lbry.network', 9252),
     ])
 
     lbryum_servers = Servers("SPV wallet servers", [
-        ('spv11.lbry.com', 50001),
-        ('spv12.lbry.com', 50001),
-        ('spv13.lbry.com', 50001),
-        ('spv14.lbry.com', 50001),
-        ('spv15.lbry.com', 50001),
-        ('spv16.lbry.com', 50001),
-        ('spv17.lbry.com', 50001),
-        ('spv18.lbry.com', 50001),
-        ('spv19.lbry.com', 50001),
+        ('s1.lbry.network', 50001),
         ('hub.lbry.grin.io', 50001),
         ('hub.lizard.technology', 50001),
-        ('s1.lbry.network', 50001),
     ])
     known_dht_nodes = Servers("Known nodes for bootstrapping connection to the DHT", [
+        ('a-hub1.odysee.com', 4444),
+        ('lbryumx1.lbry.com', 4444),
         ('dht.lbry.grin.io', 4444),  # Grin
         ('dht.lbry.madiator.com', 4444),  # Madiator
-        ('dht.lbry.pigg.es', 4444), # Pigges
-        ('lbrynet1.lbry.com', 4444),  # US EAST
-        ('lbrynet2.lbry.com', 4444),  # US WEST
-        ('lbrynet3.lbry.com', 4444),  # EU
-        ('lbrynet4.lbry.com', 4444),  # ASIA
-        ('dht.lizard.technology', 4444),  # Jack
         ('s2.lbry.network', 4444),
     ])
 
