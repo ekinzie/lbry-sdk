@@ -586,14 +586,31 @@ class Daemon(metaclass=JSONRPCServerType):
         data = await request.json()
         params = data.get('params', {})
         include_protobuf = params.pop('include_protobuf', False) if isinstance(params, dict) else False
-        result = await self._process_rpc_call(data)
+        try:
+            result = await self._process_rpc_call(data)
+        except* TerminateTaskGroup:
+            pass
         ledger = None
         if 'wallet' in self.component_manager.get_components_status():
             # self.ledger only available if wallet component is not skipped
             ledger = self.ledger
         try:
-            encoded_result = jsonrpc_dumps_pretty(
-                result, ledger=ledger, include_protobuf=include_protobuf)
+            if isinstance(result, JSONRPCError):
+                log.exception('Failed to encode JSON RPC result:')
+                encoded_result = jsonrpc_dumps_pretty(JSONRPCError(
+                    JSONRPCError.CODE_APPLICATION_ERROR,
+                    'After successfully executing the command, failed to encode result for JSON RPC response.',
+                    {'traceback': format_exc()}
+                ), ledger=ledger)
+            else:
+                for task in result[0]: # done tasks
+                    if type(task) is str:
+                        jsondata = task
+                    else:
+                        jsondata = task.result()
+                    encoded_result = jsonrpc_dumps_pretty(
+                        jsondata, ledger=ledger, include_protobuf=include_protobuf)
+                    break
         except Exception:
             log.exception('Failed to encode JSON RPC result:')
             encoded_result = jsonrpc_dumps_pretty(JSONRPCError(
@@ -4983,7 +5000,7 @@ class Daemon(metaclass=JSONRPCServerType):
         if not is_valid_blobhash(blob_hash):
             # TODO: use error from lbry.error
             raise Exception("invalid blob hash")
-        peer_q = asyncio.Queue(loop=self.component_manager.loop)
+        peer_q = asyncio.Queue()
         if self.component_manager.has_component(TRACKER_ANNOUNCER_COMPONENT):
             tracker = self.component_manager.get_component(TRACKER_ANNOUNCER_COMPONENT)
             tracker_peers = await tracker.get_kademlia_peer_list(bytes.fromhex(blob_hash))
